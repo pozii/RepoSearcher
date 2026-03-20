@@ -21,6 +21,10 @@ var (
 	flagCSV         string
 	flagExtensions  string
 	flagContext     int
+	flagSince       string
+	flagAuthor      string
+	flagChangedIn   string
+	flagCommitMsg   bool
 )
 
 var searchCmd = &cobra.Command{
@@ -29,12 +33,13 @@ var searchCmd = &cobra.Command{
 	Long: `Search for code patterns across local filesystem directories or GitHub repositories.
 
 Supports:
-  • Keyword search (default)
-  • Regex search (--regex)
-  • Case-insensitive search (--ignore-case)
-  • File extension filtering (--extensions)
-  • JSON/CSV export (--json, --csv)
-  • GitHub Codesearch API (--github)
+  - Keyword search (default)
+  - Regex search (--regex)
+  - Case-insensitive search (--ignore-case)
+  - File extension filtering (--extensions)
+  - JSON/CSV export (--json, --csv)
+  - GitHub Codesearch API (--github)
+  - Git history search (--since, --author, --changed-in)
 
 Examples:
   # Search local directory
@@ -47,7 +52,16 @@ Examples:
   repo-searcher search "TODO" owner/repo --github --github-token ghp_xxx
 
   # Export to JSON
-  repo-searcher search "error" ./project --json results.json`,
+  repo-searcher search "error" ./project --json results.json
+
+  # Search in files changed in last week
+  repo-searcher search "error" ./project --since "1 week ago"
+
+  # Search in files by author
+  repo-searcher search "TODO" ./project --author "john"
+
+  # Search in files changed in last 5 commits
+  repo-searcher search "bug" ./project --changed-in HEAD~5`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: runSearch,
 }
@@ -61,6 +75,12 @@ func init() {
 	searchCmd.Flags().StringVar(&flagCSV, "csv", "", "Export results to CSV file")
 	searchCmd.Flags().StringVar(&flagExtensions, "extensions", "", "Filter by file extensions (comma-separated, e.g. .go,.py)")
 	searchCmd.Flags().IntVar(&flagContext, "context", 0, "Lines of context around matches")
+
+	// Git flags
+	searchCmd.Flags().StringVar(&flagSince, "since", "", "Search files changed since (e.g. '1 week ago', '3 days ago')")
+	searchCmd.Flags().StringVar(&flagAuthor, "author", "", "Search files by author")
+	searchCmd.Flags().StringVar(&flagChangedIn, "changed-in", "", "Search files changed in commit range (e.g. HEAD~5)")
+	searchCmd.Flags().BoolVar(&flagCommitMsg, "commit-message", false, "Search commit messages instead of file content")
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
@@ -73,7 +93,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		extensions = strings.Split(flagExtensions, ",")
 	}
 
-	// Create config
+	// Create base config
 	config := models.SearchConfig{
 		Query:       query,
 		Paths:       paths,
@@ -85,16 +105,51 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		GitHubToken: flagGitHubToken,
 	}
 
-	// Select engine
-	var engine search.SearchEngine
-	if flagGitHub {
-		engine = search.NewGitHubEngine(flagGitHubToken)
+	// Check if git flags are used
+	useGit := flagSince != "" || flagAuthor != "" || flagChangedIn != "" || flagCommitMsg
+
+	var results []models.SearchResult
+	var err error
+
+	if useGit {
+		// Create git config
+		gitConfig := models.GitSearchConfig{
+			SearchConfig: config,
+			CommitMsg:    flagCommitMsg,
+		}
+
+		// Parse --since flag
+		if flagSince != "" {
+			sinceTime, err := search.ParseTimeFlag(flagSince)
+			if err != nil {
+				return fmt.Errorf("invalid --since value: %w", err)
+			}
+			gitConfig.Since = sinceTime
+		}
+
+		// Set author
+		if flagAuthor != "" {
+			gitConfig.Author = flagAuthor
+		}
+
+		// Set changed-in
+		if flagChangedIn != "" {
+			gitConfig.ChangedIn = flagChangedIn
+		}
+
+		// Use GitEngine
+		engine := search.NewGitEngine()
+		results, err = engine.SearchWithGit(gitConfig)
+	} else if flagGitHub {
+		// Use GitHubEngine
+		engine := search.NewGitHubEngine(flagGitHubToken)
+		results, err = engine.Search(config)
 	} else {
-		engine = search.NewLocalEngine()
+		// Use LocalEngine
+		engine := search.NewLocalEngine()
+		results, err = engine.Search(config)
 	}
 
-	// Execute search
-	results, err := engine.Search(config)
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
 	}
