@@ -3,34 +3,33 @@ set -e
 
 VERSION=${1:-"v1.0.0"}
 OUTPUT_DIR="build"
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS="-s -w -X github.com/pozii/RepoSearcher/cmd.Version=${VERSION} -X github.com/pozii/RepoSearcher/cmd.GitCommit=${COMMIT} -X 'github.com/pozii/RepoSearcher/cmd.BuildDate=${BUILD_DATE}'"
 
 mkdir -p "$OUTPUT_DIR"
 
-echo "Building repo-searcher $VERSION..."
+echo "Building repo-searcher $VERSION (commit: $COMMIT)..."
+echo "Flags: CGO_ENABLED=0 -trimpath -ldflags"
 
-# Windows AMD64
-echo "Building for Windows AMD64..."
-GOOS=windows GOARCH=amd64 go build -o "$OUTPUT_DIR/repo-searcher-windows-amd64.exe" .
+build() {
+    local os=$1 arch=$2 suffix=$3
+    echo "Building for $os/$arch..."
+    CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="$LDFLAGS" -o "$OUTPUT_DIR/repo-searcher-${os}-${arch}${suffix}" .
+}
 
-# Windows ARM64
-echo "Building for Windows ARM64..."
-GOOS=windows GOARCH=arm64 go build -o "$OUTPUT_DIR/repo-searcher-windows-arm64.exe" .
+build windows amd64 .exe
+build windows arm64 .exe
+build darwin amd64 ""
+build darwin arm64 ""
+build linux amd64 ""
+build linux arm64 ""
 
-# macOS AMD64 (Intel)
-echo "Building for macOS AMD64..."
-GOOS=darwin GOARCH=amd64 go build -o "$OUTPUT_DIR/repo-searcher-darwin-amd64" .
-
-# macOS ARM64 (Apple Silicon)
-echo "Building for macOS ARM64..."
-GOOS=darwin GOARCH=arm64 go build -o "$OUTPUT_DIR/repo-searcher-darwin-arm64" .
-
-# Linux AMD64
-echo "Building for Linux AMD64..."
-GOOS=linux GOARCH=amd64 go build -o "$OUTPUT_DIR/repo-searcher-linux-amd64" .
-
-# Linux ARM64
-echo "Building for Linux ARM64..."
-GOOS=linux GOARCH=arm64 go build -o "$OUTPUT_DIR/repo-searcher-linux-arm64" .
+echo "Generating checksums..."
+cd "$OUTPUT_DIR"
+sha256sum repo-searcher-* > checksums.txt
+cat checksums.txt
+cd ..
 
 echo ""
 echo "Build complete! Binaries in $OUTPUT_DIR/:"

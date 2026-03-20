@@ -72,17 +72,27 @@
 
 ## Installation
 
-### Quick Install (Recommended)
+### From Source (Recommended — No AV Issues)
+
+```bash
+go install github.com/pozii/RepoSearcher@v1.6.0
+```
+
+This compiles from source on your machine — antivirus won't flag it.
+
+### Quick Install
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/pozii/RepoSearcher/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/pozii/RepoSearcher/master/install.ps1 | iex
 ```
 
 **macOS/Linux:**
 ```bash
-curl -sSL https://raw.githubusercontent.com/pozii/RepoSearcher/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/pozii/RepoSearcher/master/install.sh | bash
 ```
+
+> **Note:** Antivirus software (Avast, Windows Defender, etc.) may flag the downloaded binary because it's unsigned. If this happens, use `go install` instead, or add an exception after verifying the SHA256 checksum from the release page.
 
 ### Download Binary
 

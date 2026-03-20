@@ -20,27 +20,65 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Set build variables
+        id: vars
+        run: |
+          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "COMMIT=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+          echo "LDFLAGS=-s -w -X github.com/pozii/RepoSearcher/cmd.Version=${{ github.ref_name }} -X github.com/pozii/RepoSearcher/cmd.GitCommit=${{ github.sha }} -X 'github.com/pozii/RepoSearcher/cmd.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" >> $GITHUB_OUTPUT
+
       - name: Build Windows AMD64
-        run: GOOS=windows GOARCH=amd64 go build -o build/repo-searcher-windows-amd64.exe .
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="${{ steps.vars.outputs.LDFLAGS }}" -o build/repo-searcher-windows-amd64.exe .
 
       - name: Build Windows ARM64
-        run: GOOS=windows GOARCH=arm64 go build -o build/repo-searcher-windows-arm64.exe .
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="${{ steps.vars.outputs.LDFLAGS }}" -o build/repo-searcher-windows-arm64.exe .
 
       - name: Build macOS AMD64
-        run: GOOS=darwin GOARCH=amd64 go build -o build/repo-searcher-darwin-amd64 .
+        run: CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="${{ steps.vars.outputs.LDFLAGS }}" -o build/repo-searcher-darwin-amd64 .
 
       - name: Build macOS ARM64
-        run: GOOS=darwin GOARCH=arm64 go build -o build/repo-searcher-darwin-arm64 .
+        run: CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="${{ steps.vars.outputs.LDFLAGS }}" -o build/repo-searcher-darwin-arm64 .
 
       - name: Build Linux AMD64
-        run: GOOS=linux GOARCH=amd64 go build -o build/repo-searcher-linux-amd64 .
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${{ steps.vars.outputs.LDFLAGS }}" -o build/repo-searcher-linux-amd64 .
 
       - name: Build Linux ARM64
-        run: GOOS=linux GOARCH=arm64 go build -o build/repo-searcher-linux-arm64 .
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="${{ steps.vars.outputs.LDFLAGS }}" -o build/repo-searcher-linux-arm64 .
+
+      - name: Generate checksums
+        run: |
+          cd build
+          sha256sum repo-searcher-* > checksums.txt
+          cat checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            ## ${{ github.ref_name }}
+
+            ### Installation
+
+            **Quick install (one-liner):**
+
+            **Windows (PowerShell):**
+            ```
+            irm https://raw.githubusercontent.com/pozii/RepoSearcher/master/install.ps1 | iex
+            ```
+
+            **macOS/Linux:**
+            ```
+            curl -sSL https://raw.githubusercontent.com/pozii/RepoSearcher/master/install.sh | bash
+            ```
+
+            **From source (no AV issues):**
+            ```
+            go install github.com/pozii/RepoSearcher@${{ github.ref_name }}
+            ```
+
+            ### Checksums
+            See `checksums.txt` for SHA256 verification.
           files: |
             build/repo-searcher-windows-amd64.exe
             build/repo-searcher-windows-arm64.exe
@@ -48,5 +86,6 @@ jobs:
             build/repo-searcher-darwin-arm64
             build/repo-searcher-linux-amd64
             build/repo-searcher-linux-arm64
+            build/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
