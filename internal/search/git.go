@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/pozii/RepoSearcher/internal/fileutil"
 	"github.com/pozii/RepoSearcher/pkg/models"
 )
 
@@ -52,14 +54,35 @@ func (e *GitEngine) SearchWithGit(config models.GitSearchConfig) ([]models.Searc
 			continue
 		}
 
-		changedFiles, err := e.getChangedFiles(repo, config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get changed files: %w", err)
-		}
-
 		pattern, err := CompilePattern(config.Query, config.IsRegex, config.IgnoreCase)
 		if err != nil {
 			return nil, fmt.Errorf("invalid pattern: %w", err)
+		}
+
+		// Search commit messages if --commit-message flag is set
+		if config.CommitMsg {
+			commits, err := e.getFilteredCommits(repo, config)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get commits: %w", err)
+			}
+			for _, commit := range commits {
+				for _, line := range strings.Split(commit.Message, "\n") {
+					if pattern.MatchString(line) {
+						allResults = append(allResults, models.SearchResult{
+							FilePath:    commit.Hash.String()[:8],
+							LineNumber:  0,
+							LineContent: strings.TrimSpace(line),
+							MatchText:   pattern.FindString(line),
+						})
+					}
+				}
+			}
+			continue
+		}
+
+		changedFiles, err := e.getChangedFiles(repo, config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get changed files: %w", err)
 		}
 
 		for _, filePath := range changedFiles {
@@ -102,7 +125,7 @@ func (e *GitEngine) searchPath(root string, config models.SearchConfig) ([]model
 		}
 
 		if info.IsDir() {
-			if shouldSkipDir(info.Name()) {
+			if fileutil.ShouldSkipDir(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -136,26 +159,31 @@ func (e *GitEngine) searchFile(absPath, relPath string, pattern *regexp.Regexp, 
 	}
 	defer file.Close()
 
-	var results []models.SearchResult
+	// Read all lines for context support
+	var lines []string
 	scanner := bufio.NewScanner(file)
-	lineNum := 0
-
 	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 
+	var results []models.SearchResult
+	for lineIdx, line := range lines {
 		if pattern.MatchString(line) {
+			content := line
+			if config.Context > 0 {
+				content = buildContextContent(lines, lineIdx, config.Context)
+			}
+
 			results = append(results, models.SearchResult{
 				FilePath:    relPath,
-				LineNumber:  lineNum,
-				LineContent: line,
+				LineNumber:  lineIdx + 1,
+				LineContent: content,
 				MatchText:   pattern.FindString(line),
 			})
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
 	}
 
 	return results, nil
@@ -183,24 +211,103 @@ func (e *GitEngine) findGitRepo(path string) (*git.Repository, error) {
 func (e *GitEngine) getChangedFiles(repo *git.Repository, config models.GitSearchConfig) ([]string, error) {
 	fileSet := make(map[string]bool)
 
-	commits, err := e.getFilteredCommits(repo, config)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, commit := range commits {
-		files, err := e.getFilesInCommit(repo, commit)
+	// If ChangedIn is set, use commit range instead of filtered commits
+	if config.ChangedIn != "" {
+		files, err := e.getFilesInCommitRange(repo, config.ChangedIn)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to resolve --changed-in: %w", err)
 		}
 		for _, f := range files {
 			fileSet[f] = true
+		}
+	} else {
+		commits, err := e.getFilteredCommits(repo, config)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, commit := range commits {
+			files, err := e.getFilesInCommit(repo, commit)
+			if err != nil {
+				continue
+			}
+			for _, f := range files {
+				fileSet[f] = true
+			}
 		}
 	}
 
 	files := make([]string, 0, len(fileSet))
 	for f := range fileSet {
 		files = append(files, f)
+	}
+
+	return files, nil
+}
+
+// getFilesInCommitRange returns files changed in a commit range like "HEAD~5" or "abc123..def456"
+func (e *GitEngine) getFilesInCommitRange(repo *git.Repository, refRange string) ([]string, error) {
+	var fromHash, toHash plumbing.Hash
+
+	if strings.Contains(refRange, "..") {
+		// Range format: "from..to"
+		parts := strings.SplitN(refRange, "..", 2)
+		fromRef, err := repo.ResolveRevision(plumbing.Revision(parts[0]))
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve %q: %w", parts[0], err)
+		}
+		toRef, err := repo.ResolveRevision(plumbing.Revision(parts[1]))
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve %q: %w", parts[1], err)
+		}
+		fromHash = *fromRef
+		toHash = *toRef
+	} else {
+		// Single ref: treat as "ref..HEAD"
+		ref, err := repo.ResolveRevision(plumbing.Revision(refRange))
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve %q: %w", refRange, err)
+		}
+		fromHash = *ref
+
+		headRef, err := repo.ResolveRevision(plumbing.Revision("HEAD"))
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve HEAD: %w", err)
+		}
+		toHash = *headRef
+	}
+
+	fromCommit, err := repo.CommitObject(fromHash)
+	if err != nil {
+		return nil, fmt.Errorf("cannot get from commit: %w", err)
+	}
+	toCommit, err := repo.CommitObject(toHash)
+	if err != nil {
+		return nil, fmt.Errorf("cannot get to commit: %w", err)
+	}
+
+	fromTree, err := fromCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+	toTree, err := toCommit.Tree()
+	if err != nil {
+		return nil, err
+	}
+
+	changes, err := object.DiffTree(fromTree, toTree)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, change := range changes {
+		if change.To.Name != "" {
+			files = append(files, change.To.Name)
+		}
+		if change.From.Name != "" && change.From.Name != change.To.Name {
+			files = append(files, change.From.Name)
+		}
 	}
 
 	return files, nil
@@ -214,7 +321,7 @@ func (e *GitEngine) getFilteredCommits(repo *git.Repository, config models.GitSe
 	}
 
 	var commits []object.Commit
-	commitIter.ForEach(func(commit *object.Commit) error {
+	iterErr := commitIter.ForEach(func(commit *object.Commit) error {
 		match := true
 
 		if !config.Since.IsZero() {
@@ -236,6 +343,10 @@ func (e *GitEngine) getFilteredCommits(repo *git.Repository, config models.GitSe
 
 		return nil
 	})
+
+	if iterErr != nil {
+		return commits, iterErr
+	}
 
 	return commits, nil
 }

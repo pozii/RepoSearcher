@@ -35,6 +35,7 @@ Features:
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagNoUpdate, "no-update-check", false, "Skip automatic update check")
 	rootCmd.AddCommand(searchCmd)
+	updater.SetCurrentVersion(Version)
 }
 
 func Execute() error {
@@ -53,12 +54,8 @@ func checkForUpdates(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Check for update (non-blocking, just show message)
-	release, hasUpdate, err := updater.CheckForUpdate()
-	if err != nil {
-		// Silent fail - don't block the user
-		return
-	}
+	// Check for update (cached daily, non-blocking)
+	release, hasUpdate, _ := updater.CheckForUpdateCached()
 
 	if hasUpdate {
 		fmt.Fprintf(os.Stderr, "\nNew version available: %s (current: %s)\n", release.TagName, updater.GetCurrentVersion())

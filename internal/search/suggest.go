@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
+	"github.com/pozii/RepoSearcher/internal/fileutil"
 	"github.com/pozii/RepoSearcher/pkg/models"
 )
 
@@ -70,14 +72,10 @@ func (e *SuggestEngine) suggestPath(root string, config models.SearchConfig) ([]
 		}
 	}
 
-	// Sort by score
-	for i := 0; i < len(suggestions); i++ {
-		for j := i + 1; j < len(suggestions); j++ {
-			if suggestions[j].Score > suggestions[i].Score {
-				suggestions[i], suggestions[j] = suggestions[j], suggestions[i]
-			}
-		}
-	}
+	// Sort by score descending
+	sort.Slice(suggestions, func(i, j int) bool {
+		return suggestions[i].Score > suggestions[j].Score
+	})
 
 	// Limit results
 	if len(suggestions) > 10 {
@@ -225,7 +223,7 @@ func walkFiles(root string, extensions []string, fn func(path string) error) err
 		}
 
 		if info.IsDir() {
-			if shouldSkipDir(info.Name()) {
+			if fileutil.ShouldSkipDir(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil

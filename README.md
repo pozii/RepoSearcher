@@ -2,7 +2,7 @@
 
 # RepoSearcher
 
-**A powerful CLI tool for searching code across multiple repositories**
+**A fast, feature-rich CLI tool for searching code across repositories**
 
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge&logo=opensourceinitiative&logoColor=white)](LICENSE)
@@ -12,42 +12,61 @@
 
 ---
 
-> Search with keywords or regex across local directories and GitHub repositories with beautiful colored output and export options.
-
-## Demo
-
-<!-- GIF 1: Main search demo with colored output -->
-<!-- Content: repo-searcher search "func" ./project --extensions .go -->
-<!-- Show: File paths (cyan), line numbers (green), matches (red bold) -->
-
-![Demo GIF - Placeholder](./assets/demo-search.gif)
-
-*Replace this with your GIF showing colored search results*
-
----
+> SIMD-accelerated code search with .gitignore support, fuzzy matching, GitHub integration, and an interactive TUI — all in a single binary.
 
 ## Features
 
-- **Keyword Search** - Fast text matching across files
-- **Regex Support** - Powerful pattern matching with `--regex`
-- **Colored Output** - Beautiful terminal results (Cyan, Green, Red)
-- **Multi-Directory** - Search across multiple repos/directories
-- **Export Options** - Save results as JSON or CSV
-- **Extension Filter** - Search only specific file types (`.go`, `.py`, `.js`)
-- **GitHub Integration** - Search public repos via Codesearch API
-- **GitHub Token** - Private repo support with `--github-token`
-- **Git Integration** - Search in files changed by date, author, or commits
-- **Fuzzy Search** - Tolerates typos (e.g. "fucntion" finds "function")
-- **Smart Suggestions** - AI-powered search suggestions (no API required)
-- **Interactive TUI** - Full-screen terminal search with vim navigation
-- **Symbol Search** - Find functions, structs, variables (no LSP required)
-- **Definition Finder** - Locate where a symbol is defined
-- **Reference Finder** - Find all places a symbol is used
-- **Parallel Processing** - Multi-threaded search for maximum speed
-- **Fast Binary Skip** - Instantly ignores non-code files
-- **Regex Caching** - Compiled patterns for repeated searches
-- **Auto-Update** - Checks for updates on every run
-- **Cross-Platform** - Works on Windows, macOS, Linux
+### Core Search
+- **Keyword Search** — Fast literal matching (SIMD-accelerated via `bytes.Index`)
+- **Regex Support** — Two-phase search with literal prefix extraction
+- **Fuzzy Search** — Tolerates typos (e.g. "fucntion" finds "function") using Levenshtein + Jaro-Winkler
+- **Smart Suggestions** — Auto-complete search terms from codebase identifiers
+- **Case-Insensitive** — `--ignore-case` flag
+- **Context Lines** — `--context N` lines around matches
+
+### Performance
+- **Literal-First Engine** — `bytes.Index` (AVX2) scans files before regex; 4.6x faster than naive approach
+- **[]byte-Based Search** — 99% fewer memory allocations vs line-by-line `bufio.Scanner`
+- **Parallel Processing** — Multi-core worker pool with parallel directory walking
+- **Pattern Caching** — Compiled regex patterns cached across search calls
+- **Binary File Skip** — Instantly ignores non-code files
+
+### Filtering
+- **`.gitignore` Support** — Automatically respects `.gitignore` rules
+- **`--exclude` Glob** — Exclude files by pattern (`--exclude "vendor/**,test_*"`)
+- **`--include` Glob** — Include only matching files (`--include "src/*.go"`)
+- **`--extensions`** — Filter by file type (`.go,.py,.js`)
+
+### Git Integration
+- **`--since`** — Search files changed since date (e.g. `1 week ago`)
+- **`--author`** — Filter by commit author
+- **`--changed-in`** — Search files in commit range (e.g. `HEAD~5`)
+- **`--commit-message`** — Search commit messages instead of file content
+
+### GitHub Integration
+- **Remote Search** — Search GitHub repos via Codesearch API
+- **Token Support** — `--github-token` or `GITHUB_TOKEN` env var
+- **Pagination** — Fetches up to 5 pages (150 results)
+
+### Output
+- **Streaming** — Results appear as found (no waiting for full search)
+- **Colored Output** — File paths (cyan), line numbers (green), matches (red)
+- **JSON Export** — `--json results.json`
+- **CSV Export** — `--csv results.csv`
+
+### Symbol Search (No LSP Required)
+- **Symbol Finder** — Find functions, structs, variables
+- **Definition Finder** — Locate where a symbol is defined
+- **Reference Finder** — Find all uses (word-boundary matching)
+- **Multi-Language** — Go, Python, JavaScript/TypeScript
+
+### Interactive TUI
+- **Full-Screen Search** — Bubbletea-powered terminal UI
+- **Vim Navigation** — `j/k`, `g/G`, Enter, Esc
+
+### Other
+- **Auto-Update** — Daily cached checks (no network on every run)
+- **Cross-Platform** — Windows, macOS, Linux
 
 ---
 
@@ -111,6 +130,22 @@ repo-searcher search "func\s+\w+\(" ./src --regex
 
 # Case-insensitive search
 repo-searcher search "TODO" ./project --ignore-case
+
+# Lines of context around matches
+repo-searcher search "error" ./src --context 2
+```
+
+### Exclude / Include Files
+
+```bash
+# Exclude vendor and test files
+repo-searcher search "func" ./project --exclude "vendor/**,test_*"
+
+# Only search src directory
+repo-searcher search "import" . --include "src/*"
+
+# Combine with extensions
+repo-searcher search "handler" ./src --include "*.go" --extensions .go
 ```
 
 ### Fuzzy Search (Tolerates Typos)
@@ -131,11 +166,6 @@ repo-searcher search "fucntion" ./src --fuzzy
 # Get AI-powered search suggestions (no API required)
 repo-searcher search "pars" ./src --suggest
 # Results: "parse", "parseJSON", "parseInt", "parseError"
-
-# The suggestion engine analyzes:
-# - Code identifiers
-# - Function names
-# - Pattern frequency
 ```
 
 ### Multi-Directory Search
@@ -163,6 +193,10 @@ repo-searcher search "TODO" octocat/Hello-World --github
 
 # Search private repository (requires token)
 repo-searcher search "api" owner/repo --github --github-token ghp_xxx
+
+# Or set environment variable
+export GITHUB_TOKEN=ghp_xxx
+repo-searcher search "api" owner/repo --github
 ```
 
 ### Git History Search
@@ -232,32 +266,12 @@ repo-searcher find-references "NewEngine" ./src ./lib
 
 ---
 
-## Demos (GIFs)
-
-<!-- GIF 2: Regex search demo -->
-<!-- Content: repo-searcher search "func\s+\w+\(" ./src --regex -->
-<!-- Show: Pattern matching in action -->
-
-![Regex GIF - Placeholder](./assets/demo-regex.gif)
-
-*Replace this with your GIF showing regex search*
-
-<!-- GIF 3: JSON export demo -->
-<!-- Content: repo-searcher search "error" ./project --json results.json -->
-<!-- Show: Terminal output + JSON file creation -->
-
-![Export GIF - Placeholder](./assets/demo-export.gif)
-
-*Replace this with your GIF showing JSON export*
-
----
-
 ## Auto-Update
 
-RepoSearcher automatically checks for updates on every run. When a new version is available, you'll see:
+RepoSearcher checks for updates daily (cached in `~/.repo-searcher/update-check.json`). When a new version is available:
 
 ```
-New version available: v1.0.1 (current: v1.0.0)
+New version available: v1.6.1 (current: v1.6.0)
 Run 'repo-searcher update' to update.
 ```
 
@@ -291,16 +305,31 @@ repo-searcher uninstall
 | `--suggest` | Show smart suggestions | `false` |
 | `--ignore-case` | Case-insensitive search | `false` |
 | `--github` | Search GitHub repositories | `false` |
-| `--github-token` | GitHub API token | - |
+| `--github-token` | GitHub API token (or `GITHUB_TOKEN` env) | - |
 | `--json <file>` | Export to JSON | - |
 | `--csv <file>` | Export to CSV | - |
 | `--extensions` | Filter by extensions (`.go,.py`) | all |
+| `--exclude` | Exclude files by glob (`vendor/**,test_*`) | - |
+| `--include` | Include only matching globs (`src/*.go`) | - |
 | `--context` | Lines of context around matches | `0` |
-| `--since` | Search files changed since (e.g. `1 week ago`) | - |
-| `--author` | Search files by author | - |
-| `--changed-in` | Search files in commit range (e.g. `HEAD~5`) | - |
+| `--since` | Files changed since (e.g. `1 week ago`) | - |
+| `--author` | Filter by commit author | - |
+| `--changed-in` | Files in commit range (e.g. `HEAD~5`) | - |
 | `--commit-message` | Search commit messages instead of files | `false` |
 | `--no-update-check` | Skip automatic update check | `false` |
+
+---
+
+## Performance
+
+RepoSearcher uses SIMD-accelerated literal search for maximum speed:
+
+| Search Type | Technique | vs Naive Approach |
+|-------------|-----------|-------------------|
+| Literal query | `bytes.Index` (AVX2) | **1.9x faster, 99% less allocs** |
+| Regex with prefix | Two-phase (literal scan + regex) | **4.6x faster, 99% less allocs** |
+| File traversal | Parallel directory walking | **~4x faster** on multi-core |
+| Pattern matching | `sync.Map` cache | **0ns** for cached patterns |
 
 ---
 
@@ -315,39 +344,50 @@ repo-searcher/
 │   ├── install.go        # PATH installation
 │   ├── update.go         # Manual update
 │   ├── uninstall.go      # Remove from PATH
-│   └── interactive.go    # Interactive TUI command
+│   ├── interactive.go    # Interactive TUI command
+│   ├── finddef.go        # Find definition
+│   ├── findref.go        # Find references
+│   ├── findsymbol.go     # Find symbols
+│   └── completions.go    # Shell completions
 ├── internal/
 │   ├── search/
-│   │   ├── engine.go     # Search interface
+│   │   ├── fast.go       # FastPattern, literal-first engine
 │   │   ├── local.go      # Local filesystem search
 │   │   ├── github.go     # GitHub Codesearch API
 │   │   ├── git.go        # Git history search
-│   │   ├── matcher.go    # Regex/keyword matching
+│   │   ├── matcher.go    # Regex/keyword/glob matching
 │   │   ├── fuzzy.go      # Fuzzy search (Levenshtein, Jaro-Winkler)
-│   │   └── suggest.go    # Smart suggestion engine
+│   │   ├── suggest.go    # Smart suggestion engine
+│   │   └── performance.go# Parallel engine + file collection
+│   ├── fileutil/
+│   │   ├── fileutil.go   # ShouldSkipDir (shared)
+│   │   ├── gitignore.go  # .gitignore parsing
+│   │   └── parallel_walk.go # Parallel directory walking
 │   ├── export/
 │   │   ├── json.go       # JSON export
 │   │   └── csv.go        # CSV export
 │   ├── output/
-│   │   └── color.go      # Colored terminal output
+│   │   └── color.go      # Colored terminal output + streaming
 │   ├── installer/
 │   │   └── installer.go  # Platform-specific PATH logic
 │   ├── updater/
-│   │   └── updater.go    # GitHub release check + download
+│   │   ├── updater.go    # GitHub release check + download
+│   │   └── cache.go      # Daily update check cache
 │   ├── tui/
 │   │   ├── tui.go        # Interactive TUI model
 │   │   └── styles.go     # TUI styling
-│   ├── lsp/
-│   │   └── symbol.go     # Symbol extraction and indexing
-│   └── utils/
-│       └── utils.go      # Helpers
+│   └── lsp/
+│       └── symbol.go     # Symbol extraction and indexing
 ├── pkg/
 │   └── models/
-│       └── result.go     # SearchResult struct
+│       ├── result.go     # SearchResult, SearchConfig
+│       └── git.go        # GitSearchConfig
 ├── .github/
 │   └── workflows/
-│       ├── go.yml        # CI/CD
+│       ├── go.yml        # CI (build + test + lint)
 │       └── release.yml   # Auto-release on tag
+├── install.sh            # macOS/Linux installer
+├── install.ps1           # Windows installer
 ├── build.sh              # Cross-compile (Unix)
 ├── build.ps1             # Cross-compile (Windows)
 ├── go.mod

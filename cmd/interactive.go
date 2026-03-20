@@ -75,6 +75,9 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 	fmt.Println("Press 'q' or Esc to quit, 'Enter' to search")
 	fmt.Println()
 
+	// Set TUI version
+	tui.AppVersion = Version
+
 	// Run TUI
 	if err := tui.Run(args, extensions, flagTUIRegex, flagTUIIgnoreCase); err != nil {
 		return fmt.Errorf("TUI error: %w", err)

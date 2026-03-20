@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pozii/RepoSearcher/internal/fileutil"
 	"github.com/pozii/RepoSearcher/pkg/models"
 )
 
@@ -58,7 +59,7 @@ func (e *LocalEngine) searchPath(root string, pattern *regexp.Regexp, config mod
 		}
 
 		if info.IsDir() {
-			if shouldSkipDir(info.Name()) {
+			if fileutil.ShouldSkipDir(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -92,37 +93,60 @@ func (e *LocalEngine) searchFile(filePath string, pattern *regexp.Regexp, config
 	}
 	defer file.Close()
 
-	var results []models.SearchResult
+	// Read all lines for context support
+	var lines []string
 	scanner := bufio.NewScanner(file)
-	lineNum := 0
-
 	for scanner.Scan() {
-		lineNum++
-		line := scanner.Text()
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	var results []models.SearchResult
+	for lineIdx, line := range lines {
+		lineNum := lineIdx + 1
 
 		if pattern.MatchString(line) {
+			content := line
+			if config.Context > 0 {
+				content = buildContextContent(lines, lineIdx, config.Context)
+			}
+
 			results = append(results, models.SearchResult{
 				FilePath:    filePath,
 				LineNumber:  lineNum,
-				LineContent: line,
+				LineContent: content,
 				MatchText:   pattern.FindString(line),
 			})
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
 	return results, nil
 }
 
-// shouldSkipDir checks if a directory should be skipped during search
-func shouldSkipDir(name string) bool {
-	skipDirs := map[string]bool{
-		".git": true, ".svn": true, ".hg": true,
-		"node_modules": true, "vendor": true,
-		".vscode": true, ".idea": true,
+// buildContextContent builds a content string with surrounding context lines
+func buildContextContent(lines []string, matchIdx, contextLines int) string {
+	start := matchIdx - contextLines
+	if start < 0 {
+		start = 0
 	}
-	return skipDirs[name] || strings.HasPrefix(name, ".")
+	end := matchIdx + contextLines + 1
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	var sb strings.Builder
+	for i := start; i < end; i++ {
+		prefix := "  "
+		if i == matchIdx {
+			prefix = "> "
+		}
+		sb.WriteString(prefix)
+		sb.WriteString(lines[i])
+		if i < end-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
 }

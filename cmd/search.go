@@ -20,6 +20,8 @@ var (
 	flagJSON        string
 	flagCSV         string
 	flagExtensions  string
+	flagExclude     string
+	flagInclude     string
 	flagContext     int
 	flagSince       string
 	flagAuthor      string
@@ -80,10 +82,12 @@ func init() {
 	searchCmd.Flags().BoolVar(&flagRegex, "regex", false, "Enable regex mode")
 	searchCmd.Flags().BoolVar(&flagIgnoreCase, "ignore-case", false, "Case-insensitive search")
 	searchCmd.Flags().BoolVar(&flagGitHub, "github", false, "Search GitHub repositories")
-	searchCmd.Flags().StringVar(&flagGitHubToken, "github-token", "", "GitHub API token")
+	searchCmd.Flags().StringVar(&flagGitHubToken, "github-token", "", "GitHub API token (or set GITHUB_TOKEN env var)")
 	searchCmd.Flags().StringVar(&flagJSON, "json", "", "Export results to JSON file")
 	searchCmd.Flags().StringVar(&flagCSV, "csv", "", "Export results to CSV file")
 	searchCmd.Flags().StringVar(&flagExtensions, "extensions", "", "Filter by file extensions (comma-separated, e.g. .go,.py)")
+	searchCmd.Flags().StringVar(&flagExclude, "exclude", "", "Exclude files matching glob patterns (comma-separated, e.g. '**/test_*,vendor/**')")
+	searchCmd.Flags().StringVar(&flagInclude, "include", "", "Only include files matching glob patterns (comma-separated, e.g. 'src/**/*.go')")
 	searchCmd.Flags().IntVar(&flagContext, "context", 0, "Lines of context around matches")
 
 	// Git flags
@@ -107,16 +111,31 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		extensions = strings.Split(flagExtensions, ",")
 	}
 
+	// Parse glob patterns
+	var includeGlobs, excludeGlobs []string
+	if flagInclude != "" {
+		includeGlobs = strings.Split(flagInclude, ",")
+	}
+	if flagExclude != "" {
+		excludeGlobs = strings.Split(flagExclude, ",")
+	}
+
 	// Create base config
+	githubToken := flagGitHubToken
+	if githubToken == "" {
+		githubToken = os.Getenv("GITHUB_TOKEN")
+	}
 	config := models.SearchConfig{
-		Query:       query,
-		Paths:       paths,
-		IsRegex:     flagRegex,
-		IgnoreCase:  flagIgnoreCase,
-		Context:     flagContext,
-		Extensions:  extensions,
-		GitHub:      flagGitHub,
-		GitHubToken: flagGitHubToken,
+		Query:        query,
+		Paths:        paths,
+		IsRegex:      flagRegex,
+		IgnoreCase:   flagIgnoreCase,
+		Context:      flagContext,
+		Extensions:   extensions,
+		IncludeGlobs: includeGlobs,
+		ExcludeGlobs: excludeGlobs,
+		GitHub:       flagGitHub,
+		GitHubToken:  githubToken,
 	}
 
 	// Check if git flags are used
@@ -183,14 +202,26 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	} else {
 		// Use ParallelEngine for optimized performance
 		engine := search.NewParallelEngine()
-		results, err = engine.Search(config)
+
+		if flagJSON != "" || flagCSV != "" {
+			// Need full results for export
+			results, err = engine.Search(config)
+		} else {
+			// Streaming path: print as found
+			sp := output.NewStreamingPrinter()
+			err = engine.SearchStream(config, func(r models.SearchResult) {
+				sp.OnResult(r, query)
+			})
+			sp.PrintSummary(query)
+			return err
+		}
 	}
 
 	if err != nil {
 		return fmt.Errorf("search failed: %w", err)
 	}
 
-	// Print results
+	// Print results (non-streaming path)
 	printer := output.NewPrinter()
 	printer.PrintResults(results, query)
 	printer.PrintSummary(len(results), query)

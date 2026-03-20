@@ -18,14 +18,16 @@ type SearchResults struct {
 
 // SearchConfig holds configuration for a search operation
 type SearchConfig struct {
-	Query       string
-	Paths       []string
-	IsRegex     bool
-	IgnoreCase  bool
-	Context     int
-	Extensions  []string
-	GitHub      bool
-	GitHubToken string
+	Query        string
+	Paths        []string
+	IsRegex      bool
+	IgnoreCase   bool
+	Context      int
+	Extensions   []string
+	IncludeGlobs []string
+	ExcludeGlobs []string
+	GitHub       bool
+	GitHubToken  string
 }
 
 // GitHubCodesearchResponse represents the GitHub Codesearch API response
@@ -37,20 +39,16 @@ type GitHubCodesearchResponse struct {
 
 // GitHubCodeItem represents a single code search result from GitHub
 type GitHubCodeItem struct {
-	Name       string     `json:"name"`
-	Path       string     `json:"path"`
-	Repository GitHubRepo `json:"repository"`
-	HTMLURL    string     `json:"html_url"`
+	Name        string            `json:"name"`
+	Path        string            `json:"path"`
+	Repository  GitHubRepo        `json:"repository"`
+	HTMLURL     string            `json:"html_url"`
+	TextMatches []GitHubTextMatch `json:"text_matches"`
 }
 
 // GitHubRepo represents a GitHub repository in search results
 type GitHubRepo struct {
 	FullName string `json:"full_name"`
-}
-
-// GitHubCodeMatch represents a single line match from GitHub API
-type GitHubCodeMatch struct {
-	TextMatches []GitHubTextMatch `json:"text_matches"`
 }
 
 // GitHubTextMatch represents a text match fragment

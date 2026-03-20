@@ -67,3 +67,36 @@ func (p *Printer) PrintSummary(total int, query string) {
 	fmt.Printf("Found %d matches for \"%s\"\n", total, query)
 	p.SeparatorColor.Println(strings.Repeat("═", 60))
 }
+
+// StreamingPrinter prints results as they arrive (for real-time output)
+type StreamingPrinter struct {
+	*Printer
+	lastFile string
+	count    int
+}
+
+// NewStreamingPrinter creates a new StreamingPrinter
+func NewStreamingPrinter() *StreamingPrinter {
+	return &StreamingPrinter{Printer: NewPrinter()}
+}
+
+// OnResult prints a single result as it arrives
+func (sp *StreamingPrinter) OnResult(r models.SearchResult, query string) {
+	if r.FilePath != sp.lastFile {
+		if sp.lastFile != "" {
+			sp.SeparatorColor.Println(strings.Repeat("─", 60))
+		}
+		sp.FileColor.Println(r.FilePath)
+		sp.lastFile = r.FilePath
+	}
+	sp.printMatch(r, query)
+	sp.count++
+}
+
+// PrintSummary prints the final summary after streaming
+func (sp *StreamingPrinter) PrintSummary(query string) {
+	fmt.Println()
+	sp.SeparatorColor.Println(strings.Repeat("═", 60))
+	fmt.Printf("Found %d matches for \"%s\"\n", sp.count, query)
+	sp.SeparatorColor.Println(strings.Repeat("═", 60))
+}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/pozii/RepoSearcher/internal/fileutil"
 )
 
 // Symbol represents a code symbol (function, struct, variable, type, etc.)
@@ -48,7 +50,7 @@ func (e *SymbolExtractor) ExtractSymbols(root string, extensions []string) (Symb
 		}
 
 		if info.IsDir() {
-			if shouldSkipDir(info.Name()) {
+			if fileutil.ShouldSkipDir(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -382,6 +384,16 @@ func (e *SymbolExtractor) FindDefinition(index SymbolIndex, name string) []Symbo
 
 // FindReferences finds all references to a symbol
 func (e *SymbolExtractor) FindReferences(root string, name string, extensions []string) ([]Reference, error) {
+	if name == "" {
+		return nil, nil
+	}
+
+	// Compile word-boundary patterns once for all files
+	pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
+	defFuncPattern := regexp.MustCompile(`\bfunc\s+` + regexp.QuoteMeta(name) + `\b`)
+	defTypePattern := regexp.MustCompile(`\btype\s+` + regexp.QuoteMeta(name) + `\b`)
+	defVarPattern := regexp.MustCompile(`\b(?:var|const)\s+` + regexp.QuoteMeta(name) + `\b`)
+
 	var references []Reference
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -390,7 +402,7 @@ func (e *SymbolExtractor) FindReferences(root string, name string, extensions []
 		}
 
 		if info.IsDir() {
-			if shouldSkipDir(info.Name()) {
+			if fileutil.ShouldSkipDir(info.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -404,7 +416,7 @@ func (e *SymbolExtractor) FindReferences(root string, name string, extensions []
 			return nil
 		}
 
-		refs, err := e.findReferencesInFile(path, name)
+		refs, err := e.findReferencesInFile(path, name, pattern, defFuncPattern, defTypePattern, defVarPattern)
 		if err != nil {
 			return nil
 		}
@@ -417,8 +429,9 @@ func (e *SymbolExtractor) FindReferences(root string, name string, extensions []
 	return references, err
 }
 
-// findReferencesInFile finds references in a single file
-func (e *SymbolExtractor) findReferencesInFile(path string, name string) ([]Reference, error) {
+// findReferencesInFile finds references in a single file using pre-compiled patterns
+func (e *SymbolExtractor) findReferencesInFile(path, name string,
+	pattern, defFuncPattern, defTypePattern, defVarPattern *regexp.Regexp) ([]Reference, error) {
 	var references []Reference
 
 	file, err := os.Open(path)
@@ -434,12 +447,11 @@ func (e *SymbolExtractor) findReferencesInFile(path string, name string) ([]Refe
 		lineNum++
 		line := scanner.Text()
 
-		if strings.Contains(line, name) {
-			// Determine category
+		if pattern.MatchString(line) {
 			category := "usage"
-			if strings.Contains(line, "func "+name) ||
-				strings.Contains(line, "type "+name) ||
-				strings.Contains(line, "var "+name) {
+			if defFuncPattern.MatchString(line) ||
+				defTypePattern.MatchString(line) ||
+				defVarPattern.MatchString(line) {
 				category = "definition"
 			}
 
@@ -479,15 +491,4 @@ func isSupportedFile(path string, extensions []string) bool {
 	}
 
 	return false
-}
-
-// shouldSkipDir checks if a directory should be skipped
-func shouldSkipDir(name string) bool {
-	skipDirs := map[string]bool{
-		".git": true, ".svn": true, ".hg": true,
-		"node_modules": true, "vendor": true,
-		".vscode": true, ".idea": true,
-		"__pycache__": true, ".venv": true,
-	}
-	return skipDirs[name] || strings.HasPrefix(name, ".")
 }

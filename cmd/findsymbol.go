@@ -54,11 +54,17 @@ func runFindSymbol(cmd *cobra.Command, args []string) error {
 		extensions = strings.Split(flagFindExt, ",")
 	}
 
-	// Extract symbols
+	// Extract symbols from all paths
 	extractor := lsp.NewSymbolExtractor()
-	index, err := extractor.ExtractSymbols(paths[0], extensions)
-	if err != nil {
-		return fmt.Errorf("symbol extraction failed: %w", err)
+	index := make(lsp.SymbolIndex)
+	for _, p := range paths {
+		idx, err := extractor.ExtractSymbols(p, extensions)
+		if err != nil {
+			return fmt.Errorf("symbol extraction failed for %s: %w", p, err)
+		}
+		for name, syms := range idx {
+			index[name] = append(index[name], syms...)
+		}
 	}
 
 	// Find matching symbols

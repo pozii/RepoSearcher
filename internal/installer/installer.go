@@ -159,16 +159,25 @@ func removeFromPATH(dir string) error {
 
 // Windows PATH management
 func addWindowsPath(dir string) error {
-	cmd := exec.Command("powershell", "-Command",
-		fmt.Sprintf("[Environment]::SetEnvironmentVariable('PATH', '%s;' + [Environment]::GetEnvironmentVariable('PATH', 'User'), 'User')", dir))
+	cmd := exec.Command("powershell", "-Command", `
+		param($InstallDir)
+		$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+		if ($currentPath -notlike "*$InstallDir*") {
+			[Environment]::SetEnvironmentVariable('PATH', "$InstallDir;$currentPath", 'User')
+		}
+	`, "-InstallDir", dir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func removeWindowsPath(dir string) error {
-	cmd := exec.Command("powershell", "-Command",
-		fmt.Sprintf("[Environment]::SetEnvironmentVariable('PATH', ([Environment]::GetEnvironmentVariable('PATH', 'User')).Replace('%s;', ''), 'User')", dir))
+	cmd := exec.Command("powershell", "-Command", `
+		param($InstallDir)
+		$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+		$newPath = ($currentPath -split ';' | Where-Object { $_ -ne $InstallDir }) -join ';'
+		[Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
+	`, "-InstallDir", dir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

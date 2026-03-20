@@ -2,6 +2,7 @@ package search
 
 import (
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -42,9 +43,8 @@ func LevenshteinDistance(s1, s2 string) int {
 				cost = 0
 			}
 			matrix[i][j] = min(
-				matrix[i-1][j]+1,      // deletion
-				matrix[i][j-1]+1,      // insertion
-				matrix[i-1][j-1]+cost, // substitution
+				matrix[i-1][j]+1,                             // deletion
+				min(matrix[i][j-1]+1, matrix[i-1][j-1]+cost), // insertion + substitution
 			)
 		}
 	}
@@ -139,26 +139,6 @@ func JaroWinklerSimilarity(s1, s2 string) float64 {
 	return winkler
 }
 
-// FuzzyMatch checks if two strings match with fuzzy tolerance
-func FuzzyMatch(query, target string, threshold float64) bool {
-	// Exact match first
-	if strings.EqualFold(query, target) {
-		return true
-	}
-
-	// Contains match
-	if strings.Contains(strings.ToLower(target), strings.ToLower(query)) {
-		return true
-	}
-
-	// Levenshtein distance check
-	distance := LevenshteinDistance(query, target)
-	maxLen := int(math.Max(float64(len(query)), float64(len(target))))
-	similarity := 1.0 - float64(distance)/float64(maxLen)
-
-	return similarity >= threshold
-}
-
 // FuzzyScore returns a similarity score between 0 and 1
 func FuzzyScore(query, target string) float64 {
 	query = strings.ToLower(query)
@@ -201,13 +181,9 @@ func FuzzyFindAll(query string, candidates []string, threshold float64) []FuzzyR
 	}
 
 	// Sort by score descending
-	for i := 0; i < len(results); i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[j].Score > results[i].Score {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
 
 	return results
 }
@@ -216,15 +192,4 @@ func FuzzyFindAll(query string, candidates []string, threshold float64) []FuzzyR
 type FuzzyResult struct {
 	Text  string
 	Score float64
-}
-
-// min returns the minimum of three integers
-func min(a, b, c int) int {
-	if a < b && a < c {
-		return a
-	}
-	if b < c {
-		return b
-	}
-	return c
 }

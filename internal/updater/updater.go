@@ -1,12 +1,16 @@
 package updater
 
 import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,9 +33,17 @@ type Asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
+// currentVersion holds the binary version, set by the cmd package at startup
+var currentVersion = "v1.0.0"
+
+// SetCurrentVersion sets the current binary version (called by cmd at init)
+func SetCurrentVersion(v string) {
+	currentVersion = v
+}
+
 // GetCurrentVersion returns the current binary version
 func GetCurrentVersion() string {
-	return "v1.0.0"
+	return currentVersion
 }
 
 // CheckForUpdate checks if a newer version is available
@@ -57,12 +69,33 @@ func Update(release *Release) error {
 		return err
 	}
 
+	// Get expected checksum
+	checksumURL := getChecksumURL(release)
+	var expectedChecksum string
+	if checksumURL != "" {
+		expectedChecksum, err = downloadExpectedChecksum(checksumURL, assetURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not verify checksum: %v\n", err)
+		}
+	}
+
 	// Download new binary
 	tmpFile, err := downloadBinary(assetURL)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
 	defer os.Remove(tmpFile)
+
+	// Verify checksum if available
+	if expectedChecksum != "" {
+		actualChecksum, err := computeSHA256(tmpFile)
+		if err != nil {
+			return fmt.Errorf("failed to compute checksum: %w", err)
+		}
+		if actualChecksum != expectedChecksum {
+			return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
+		}
+	}
 
 	// Replace current binary
 	if err := replaceBinary(tmpFile); err != nil {
@@ -165,6 +198,66 @@ func replaceBinary(newBinaryPath string) error {
 	return nil
 }
 
+// computeSHA256 computes the SHA256 hash of a file
+func computeSHA256(filePath string) (string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// getChecksumURL returns the URL of the checksums file asset in a release
+func getChecksumURL(release *Release) string {
+	for _, asset := range release.Assets {
+		name := strings.ToLower(asset.Name)
+		if strings.Contains(name, "checksums") || strings.Contains(name, "sha256") {
+			return asset.BrowserDownloadURL
+		}
+	}
+	return ""
+}
+
+// downloadExpectedChecksum downloads the checksums file and extracts the expected hash
+// for the given asset URL. The checksums file format: "<hash>  <filename>"
+func downloadExpectedChecksum(checksumURL, assetURL string) (string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(checksumURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download checksums: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("checksums download failed with status %d", resp.StatusCode)
+	}
+
+	// Extract filename from asset URL
+	assetFilename := assetURL[strings.LastIndex(assetURL, "/")+1:]
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			hash := parts[0]
+			filename := parts[len(parts)-1]
+			if strings.Contains(filename, assetFilename) || assetFilename == filename {
+				return strings.ToLower(hash), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("checksum for %s not found in checksums file", assetFilename)
+}
+
 func isNewerVersion(new, old string) bool {
 	new = strings.TrimPrefix(new, "v")
 	old = strings.TrimPrefix(old, "v")
@@ -173,10 +266,12 @@ func isNewerVersion(new, old string) bool {
 	oldParts := strings.Split(old, ".")
 
 	for i := 0; i < len(newParts) && i < len(oldParts); i++ {
-		if newParts[i] > oldParts[i] {
+		n, _ := strconv.Atoi(newParts[i])
+		o, _ := strconv.Atoi(oldParts[i])
+		if n > o {
 			return true
 		}
-		if newParts[i] < oldParts[i] {
+		if n < o {
 			return false
 		}
 	}

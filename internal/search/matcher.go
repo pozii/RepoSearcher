@@ -1,49 +1,14 @@
 package search
 
 import (
+	"fmt"
+	"os"
 	"regexp"
 	"strings"
+	"sync"
+
+	"github.com/gobwas/glob"
 )
-
-// Match performs text matching based on configuration
-func Match(line, query string, isRegex, ignoreCase bool) ([]string, error) {
-	if isRegex {
-		return matchRegex(line, query, ignoreCase)
-	}
-	return matchKeyword(line, query, ignoreCase), nil
-}
-
-// matchRegex finds all regex matches in a line
-func matchRegex(line, pattern string, ignoreCase bool) ([]string, error) {
-	if ignoreCase {
-		pattern = "(?i)" + pattern
-	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return nil, err
-	}
-	matches := re.FindAllString(line, -1)
-	if matches == nil {
-		return []string{}, nil
-	}
-	return matches, nil
-}
-
-// matchKeyword finds keyword occurrences in a line
-func matchKeyword(line, query string, ignoreCase bool) []string {
-	if ignoreCase {
-		line = strings.ToLower(line)
-		query = strings.ToLower(query)
-	}
-
-	var matches []string
-	for i := 0; i <= len(line)-len(query); i++ {
-		if line[i:i+len(query)] == query {
-			matches = append(matches, query)
-		}
-	}
-	return matches
-}
 
 // ShouldIgnoreFile checks if a file should be excluded from search
 func ShouldIgnoreFile(path string, extensions []string) bool {
@@ -73,4 +38,59 @@ func CompilePattern(query string, isRegex, ignoreCase bool) (*regexp.Regexp, err
 		escaped = "(?i)" + escaped
 	}
 	return regexp.Compile(escaped)
+}
+
+// globCache caches compiled glob patterns
+var globCache sync.Map
+
+func compileGlob(pattern string) (glob.Glob, error) {
+	if cached, ok := globCache.Load(pattern); ok {
+		return cached.(glob.Glob), nil
+	}
+	compiled, err := glob.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	globCache.Store(pattern, compiled)
+	return compiled, nil
+}
+
+// ShouldIgnoreFileByGlobs checks if a file path matches any exclude glob
+// or fails to match any include glob.
+func ShouldIgnoreFileByGlobs(path string, includeGlobs, excludeGlobs []string) bool {
+	// Normalize path separators for glob matching
+	normalized := strings.ReplaceAll(path, string(os.PathSeparator), "/")
+
+	// Check excludes first
+	for _, pattern := range excludeGlobs {
+		g, err := compileGlob(pattern)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: invalid glob pattern %q: %v\n", pattern, err)
+			continue
+		}
+		if g.Match(normalized) {
+			return true
+		}
+	}
+
+	// Check includes (if specified, file must match at least one)
+	if len(includeGlobs) > 0 {
+		matched := false
+		for _, pattern := range includeGlobs {
+			g, err := compileGlob(pattern)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: invalid glob pattern %q: %v\n", pattern, err)
+				continue
+			}
+			if g.Match(normalized) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return true
+		}
+	}
+
+	return false
 }

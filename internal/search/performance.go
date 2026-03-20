@@ -1,14 +1,14 @@
 package search
 
 import (
-	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sync"
-	"sync/atomic"
 
+	"github.com/pozii/RepoSearcher/internal/fileutil"
 	"github.com/pozii/RepoSearcher/pkg/models"
 )
 
@@ -49,33 +49,34 @@ func GetCompiledPattern(query string, isRegex, ignoreCase bool) (*regexp.Regexp,
 // Search performs a parallel search with performance optimizations
 func (e *ParallelEngine) Search(config models.SearchConfig) ([]models.SearchResult, error) {
 	var allResults []models.SearchResult
-
-	for _, root := range config.Paths {
-		results, err := e.searchPathParallel(root, config)
-		if err != nil {
-			return nil, err
-		}
-		allResults = append(allResults, results...)
-	}
-
-	return allResults, nil
+	err := e.SearchStream(config, func(r models.SearchResult) {
+		allResults = append(allResults, r)
+	})
+	return allResults, err
 }
 
-// searchPathParallel searches a path using parallel goroutines
-func (e *ParallelEngine) searchPathParallel(root string, config models.SearchConfig) ([]models.SearchResult, error) {
-	// Compile pattern once (cached)
-	pattern, err := GetCompiledPattern(config.Query, config.IsRegex, config.IgnoreCase)
+// SearchStream performs a parallel search, calling callback for each result as found
+func (e *ParallelEngine) SearchStream(config models.SearchConfig, callback func(models.SearchResult)) error {
+	for _, root := range config.Paths {
+		if err := e.searchPathStream(root, config, callback); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// searchPathStream searches a path and streams results via callback
+func (e *ParallelEngine) searchPathStream(root string, config models.SearchConfig, callback func(models.SearchResult)) error {
+	pattern, err := GetFastPattern(config.Query, config.IsRegex, config.IgnoreCase)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// Collect all files first
-	files, err := e.collectFiles(root, config.Extensions)
+	files, err := e.collectFiles(root, config)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// Determine number of workers
 	numWorkers := runtime.NumCPU()
 	if numWorkers > len(files) {
 		numWorkers = len(files)
@@ -84,26 +85,23 @@ func (e *ParallelEngine) searchPathParallel(root string, config models.SearchCon
 		numWorkers = 1
 	}
 
-	// Parallel search with channels
 	fileChan := make(chan string, len(files))
-	resultChan := make(chan []models.SearchResult, len(files))
+	resultChan := make(chan models.SearchResult, 256)
 
-	// Start workers
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for filePath := range fileChan {
-				results := e.searchFileFast(filePath, pattern, config)
-				if len(results) > 0 {
-					resultChan <- results
+				results := searchFileBytes(filePath, pattern, config)
+				for _, r := range results {
+					resultChan <- r
 				}
 			}
 		}()
 	}
 
-	// Send files to workers
 	go func() {
 		for _, file := range files {
 			fileChan <- file
@@ -111,23 +109,20 @@ func (e *ParallelEngine) searchPathParallel(root string, config models.SearchCon
 		close(fileChan)
 	}()
 
-	// Wait for all workers to finish
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// Collect results
-	var results []models.SearchResult
-	for batch := range resultChan {
-		results = append(results, batch...)
+	for result := range resultChan {
+		callback(result)
 	}
 
-	return results, nil
+	return nil
 }
 
-// collectFiles collects all files to search
-func (e *ParallelEngine) collectFiles(root string, extensions []string) ([]string, error) {
+// collectFiles collects all files to search using parallel directory walking
+func (e *ParallelEngine) collectFiles(root string, config models.SearchConfig) ([]string, error) {
 	var files []string
 
 	info, err := os.Stat(root)
@@ -136,74 +131,209 @@ func (e *ParallelEngine) collectFiles(root string, extensions []string) ([]strin
 	}
 
 	if !info.IsDir() {
-		if !ShouldIgnoreFile(root, extensions) && !isBinaryFile(root) {
+		if !ShouldIgnoreFile(root, config.Extensions) && !ShouldIgnoreFileByGlobs(root, config.IncludeGlobs, config.ExcludeGlobs) && !isBinaryFile(root) {
 			files = append(files, root)
 		}
 		return files, nil
 	}
 
-	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+	matcher := fileutil.NewGitIgnoreMatcher(root)
+
+	shouldSkip := func(name, relPath string, isDir bool) bool {
+		if fileutil.ShouldSkipDir(name) {
+			return true
+		}
+		if matcher != nil && matcher.ShouldIgnore(relPath, isDir) {
+			return true
+		}
+		return false
+	}
+
+	var mu sync.Mutex
+
+	err = fileutil.ParallelWalk(root, shouldSkip, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !d.Type().IsRegular() {
 			return nil
 		}
 
-		if info.IsDir() {
-			if shouldSkipDir(info.Name()) {
-				return filepath.SkipDir
+		// Check .gitignore for files
+		if matcher != nil {
+			relPath, relErr := filepath.Rel(root, path)
+			if relErr == nil && matcher.ShouldIgnore(relPath, false) {
+				return nil
 			}
-			return nil
 		}
 
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-
-		// Fast binary check
 		if isBinaryFile(path) {
 			return nil
 		}
 
-		if ShouldIgnoreFile(path, extensions) {
+		if ShouldIgnoreFile(path, config.Extensions) {
 			return nil
 		}
 
+		if ShouldIgnoreFileByGlobs(path, config.IncludeGlobs, config.ExcludeGlobs) {
+			return nil
+		}
+
+		mu.Lock()
 		files = append(files, path)
+		mu.Unlock()
 		return nil
 	})
 
 	return files, err
 }
 
-// searchFileFast searches a file with optimizations
-func (e *ParallelEngine) searchFileFast(filePath string, pattern *regexp.Regexp, config models.SearchConfig) []models.SearchResult {
-	file, err := os.Open(filePath)
-	if err != nil {
+// searchFileBytes searches a file using []byte-based fast path.
+// Uses os.ReadFile + bytes.Index for literal queries (SIMD-accelerated).
+// Falls back to regex only for candidate lines with literal prefix matches.
+func searchFileBytes(filePath string, pattern *FastPattern, config models.SearchConfig) []models.SearchResult {
+	// Read entire file into memory — fastest for code-sized files (< 100MB)
+	data, err := os.ReadFile(filePath)
+	if err != nil || len(data) == 0 {
 		return nil
 	}
-	defer file.Close()
 
+	// Early exit: pre-scan file for literal — skip entire file with one SIMD scan
+	if pattern.HasLiteral() && !pattern.PreScanFile(data) {
+		return nil
+	}
+
+	// Pure literal, case-sensitive — fastest possible path
+	if pattern.isFullLiteral && !pattern.isCI {
+		return searchLiteralBytes(data, filePath, pattern.literal)
+	}
+
+	// Regex or case-insensitive — []byte-based line scanning with regex
+	return searchRegexBytes(data, filePath, pattern, config)
+}
+
+// searchLiteralBytes does pure literal matching on []byte — zero regex, zero string alloc for non-matches
+func searchLiteralBytes(data []byte, filePath string, literal []byte) []models.SearchResult {
 	var results []models.SearchResult
-	scanner := bufio.NewScanner(file)
 	lineNum := 0
+	pos := 0
 
-	// Use a larger buffer for faster scanning
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
-
-	for scanner.Scan() {
+	for pos < len(data) {
+		lineEnd := pos
+		for lineEnd < len(data) && data[lineEnd] != '\n' {
+			lineEnd++
+		}
 		lineNum++
-		line := scanner.Text()
 
-		if pattern.MatchString(line) {
+		if bytes.Index(data[pos:lineEnd], literal) >= 0 {
 			results = append(results, models.SearchResult{
 				FilePath:    filePath,
 				LineNumber:  lineNum,
-				LineContent: line,
-				MatchText:   pattern.FindString(line),
+				LineContent: string(data[pos:lineEnd]),
+				MatchText:   string(literal),
+			})
+		}
+
+		pos = lineEnd + 1
+	}
+
+	return results
+}
+
+// searchRegexBytes does regex matching on []byte with optional two-phase literal pre-scan
+func searchRegexBytes(data []byte, filePath string, pattern *FastPattern, config models.SearchConfig) []models.SearchResult {
+	// Two-phase search: scan for literal prefix first, then regex only on candidates
+	if len(pattern.regexPrefix) > 0 {
+		return searchTwoPhaseBytes(data, filePath, pattern, config)
+	}
+
+	// No literal prefix — line-by-line regex on []byte
+	var results []models.SearchResult
+	lineNum := 0
+	pos := 0
+
+	for pos < len(data) {
+		lineEnd := pos
+		for lineEnd < len(data) && data[lineEnd] != '\n' {
+			lineEnd++
+		}
+		lineNum++
+		line := data[pos:lineEnd]
+
+		if pattern.regex.Match(line) {
+			matchText := pattern.FindMatch(line)
+			results = append(results, models.SearchResult{
+				FilePath:    filePath,
+				LineNumber:  lineNum,
+				LineContent: string(line),
+				MatchText:   string(matchText),
+			})
+		}
+
+		pos = lineEnd + 1
+	}
+
+	return results
+}
+
+// searchTwoPhaseBytes uses literal prefix scan + regex on candidate lines
+func searchTwoPhaseBytes(data []byte, filePath string, pattern *FastPattern, config models.SearchConfig) []models.SearchResult {
+	var results []models.SearchResult
+	lineNum := 0
+	pos := 0
+
+	searchPrefix := pattern.regexPrefix
+	searchData := data
+	if pattern.isCI {
+		searchData = bytes.ToLower(data)
+	}
+
+	for pos < len(data) {
+		// Find next literal prefix match
+		relIdx := bytes.Index(searchData[pos:], searchPrefix)
+		if relIdx < 0 {
+			break
+		}
+		matchPos := pos + relIdx
+
+		// Find line boundaries
+		lineStart := matchPos
+		for lineStart > 0 && data[lineStart-1] != '\n' {
+			lineStart--
+		}
+		lineEnd := matchPos
+		for lineEnd < len(data) && data[lineEnd] != '\n' {
+			lineEnd++
+		}
+
+		// Count line number
+		lineNum += countNewlines(data[pos:lineStart])
+		lineNum++
+		pos = lineEnd + 1
+
+		line := data[lineStart:lineEnd]
+
+		// Run regex only on this candidate line
+		if pattern.regex.Match(line) {
+			matchText := pattern.FindMatch(line)
+			results = append(results, models.SearchResult{
+				FilePath:    filePath,
+				LineNumber:  lineNum,
+				LineContent: string(line),
+				MatchText:   string(matchText),
 			})
 		}
 	}
 
 	return results
+}
+
+// countNewlines counts newline bytes in data
+func countNewlines(data []byte) int {
+	return bytes.Count(data, []byte{'\n'})
 }
 
 // isBinaryFile checks if a file is binary (fast check)
@@ -228,55 +358,4 @@ func isBinaryFile(path string) bool {
 	}
 
 	return false
-}
-
-// PerformanceStats tracks search performance
-type PerformanceStats struct {
-	FilesScanned   int64
-	FilesSkipped   int64
-	MatchesFound   int64
-	BytesScanned   int64
-	GoroutinesUsed int
-}
-
-var stats struct {
-	filesScanned atomic.Int64
-	filesSkipped atomic.Int64
-	matchesFound atomic.Int64
-	bytesScanned atomic.Int64
-	mu           sync.Mutex
-}
-
-// ResetStats resets the performance stats
-func ResetStats() {
-	stats.filesScanned.Store(0)
-	stats.filesSkipped.Store(0)
-	stats.matchesFound.Store(0)
-	stats.bytesScanned.Store(0)
-}
-
-// GetStats returns the current performance stats
-func GetStats() PerformanceStats {
-	return PerformanceStats{
-		FilesScanned:   stats.filesScanned.Load(),
-		FilesSkipped:   stats.filesSkipped.Load(),
-		MatchesFound:   stats.matchesFound.Load(),
-		BytesScanned:   stats.bytesScanned.Load(),
-		GoroutinesUsed: runtime.NumCPU(),
-	}
-}
-
-// IncrementScanned increments files scanned counter
-func IncrementScanned() {
-	stats.filesScanned.Add(1)
-}
-
-// IncrementSkipped increments files skipped counter
-func IncrementSkipped() {
-	stats.filesSkipped.Add(1)
-}
-
-// IncrementMatches increments matches found counter
-func IncrementMatches() {
-	stats.matchesFound.Add(1)
 }

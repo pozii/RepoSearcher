@@ -54,11 +54,15 @@ func runFindRef(cmd *cobra.Command, args []string) error {
 		extensions = strings.Split(flagFindExt, ",")
 	}
 
-	// Find references
+	// Find references across all paths
 	extractor := lsp.NewSymbolExtractor()
-	references, err := extractor.FindReferences(paths[0], name, extensions)
-	if err != nil {
-		return fmt.Errorf("reference search failed: %w", err)
+	var references []lsp.Reference
+	for _, p := range paths {
+		refs, err := extractor.FindReferences(p, name, extensions)
+		if err != nil {
+			return fmt.Errorf("reference search failed for %s: %w", p, err)
+		}
+		references = append(references, refs...)
 	}
 
 	if len(references) == 0 {

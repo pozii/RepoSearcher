@@ -6,9 +6,13 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pozii/RepoSearcher/internal/export"
 	"github.com/pozii/RepoSearcher/internal/search"
 	"github.com/pozii/RepoSearcher/pkg/models"
 )
+
+// AppVersion is set by the cmd package at startup
+var AppVersion = "dev"
 
 // Model represents the TUI application state
 type Model struct {
@@ -124,7 +128,7 @@ func (m Model) View() string {
 	var sb strings.Builder
 
 	// Title
-	title := titleStyle.Render("RepoSearcher v1.2.0 - Interactive Search")
+	title := titleStyle.Render("RepoSearcher " + AppVersion + " - Interactive Search")
 	sb.WriteString(title + "\n\n")
 
 	// Query input
@@ -250,8 +254,8 @@ func searchCmd(query string, paths []string, extensions string, isRegex, ignoreC
 			Extensions: ext,
 		}
 
-		// Use LocalEngine
-		engine := search.NewLocalEngine()
+		// Use ParallelEngine for optimized performance
+		engine := search.NewParallelEngine()
 		results, err := engine.Search(config)
 		if err != nil {
 			return errMsg{err}
@@ -261,7 +265,9 @@ func searchCmd(query string, paths []string, extensions string, isRegex, ignoreC
 	}
 }
 
-// Export placeholder
+// exportJSON exports search results to a JSON file
 func exportJSON(results []models.SearchResult, filename string) {
-	// This will be integrated with the export package later
+	if err := export.ToJSON(results, filename); err != nil {
+		return
+	}
 }
