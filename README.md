@@ -40,6 +40,9 @@
 - **Fuzzy Search** - Tolerates typos (e.g. "fucntion" finds "function")
 - **Smart Suggestions** - AI-powered search suggestions (no API required)
 - **Interactive TUI** - Full-screen terminal search with vim navigation
+- **Symbol Search** - Find functions, structs, variables (no LSP required)
+- **Definition Finder** - Locate where a symbol is defined
+- **Reference Finder** - Find all places a symbol is used
 - **Auto-Update** - Checks for updates on every run
 - **Cross-Platform** - Works on Windows, macOS, Linux
 
@@ -205,6 +208,25 @@ Keyboard shortcuts in TUI mode:
 - `e` - Export results to JSON
 - `q/Esc` - Quit
 
+### Symbol Search (No LSP Required)
+
+```bash
+# Find symbols matching a name
+repo-searcher find-symbol "Engine" .
+
+# Find in Go files only
+repo-searcher find-symbol "ParseJSON" ./src --ext .go
+
+# Find definition of a symbol
+repo-searcher find-definition "SearchEngine" .
+
+# Find all references to a symbol
+repo-searcher find-references "config" ./src
+
+# Find across multiple directories
+repo-searcher find-references "NewEngine" ./src ./lib
+```
+
 ---
 
 ## Demos (GIFs)
@@ -312,6 +334,8 @@ repo-searcher/
 │   ├── tui/
 │   │   ├── tui.go        # Interactive TUI model
 │   │   └── styles.go     # TUI styling
+│   ├── lsp/
+│   │   └── symbol.go     # Symbol extraction and indexing
 │   └── utils/
 │       └── utils.go      # Helpers
 ├── pkg/
