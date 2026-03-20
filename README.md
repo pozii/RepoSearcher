@@ -36,6 +36,7 @@
 - **Extension Filter** - Search only specific file types (`.go`, `.py`, `.js`)
 - **GitHub Integration** - Search public repos via Codesearch API
 - **GitHub Token** - Private repo support with `--github-token`
+- **Git Integration** - Search in files changed by date, author, or commits
 - **Auto-Update** - Checks for updates on every run
 - **Cross-Platform** - Works on Windows, macOS, Linux
 
@@ -130,6 +131,22 @@ repo-searcher search "TODO" octocat/Hello-World --github
 repo-searcher search "api" owner/repo --github --github-token ghp_xxx
 ```
 
+### Git History Search
+
+```bash
+# Search files changed in last week
+repo-searcher search "error" ./project --since "1 week ago"
+
+# Search files by specific author
+repo-searcher search "TODO" ./project --author "john"
+
+# Search files changed in last 5 commits
+repo-searcher search "bug" ./project --changed-in HEAD~5
+
+# Search commit messages
+repo-searcher search "refactor" ./project --commit-message
+```
+
 ### Export Results
 
 ```bash
@@ -204,6 +221,10 @@ repo-searcher uninstall
 | `--csv <file>` | Export to CSV | - |
 | `--extensions` | Filter by extensions (`.go,.py`) | all |
 | `--context` | Lines of context around matches | `0` |
+| `--since` | Search files changed since (e.g. `1 week ago`) | - |
+| `--author` | Search files by author | - |
+| `--changed-in` | Search files in commit range (e.g. `HEAD~5`) | - |
+| `--commit-message` | Search commit messages instead of files | `false` |
 | `--no-update-check` | Skip automatic update check | `false` |
 
 ---
@@ -224,6 +245,7 @@ repo-searcher/
 │   │   ├── engine.go     # Search interface
 │   │   ├── local.go      # Local filesystem search
 │   │   ├── github.go     # GitHub Codesearch API
+│   │   ├── git.go        # Git history search
 │   │   └── matcher.go    # Regex/keyword matching
 │   ├── export/
 │   │   ├── json.go       # JSON export
