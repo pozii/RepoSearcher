@@ -43,6 +43,9 @@
 - **Symbol Search** - Find functions, structs, variables (no LSP required)
 - **Definition Finder** - Locate where a symbol is defined
 - **Reference Finder** - Find all places a symbol is used
+- **Parallel Processing** - Multi-threaded search for maximum speed
+- **Fast Binary Skip** - Instantly ignores non-code files
+- **Regex Caching** - Compiled patterns for repeated searches
 - **Auto-Update** - Checks for updates on every run
 - **Cross-Platform** - Works on Windows, macOS, Linux
 

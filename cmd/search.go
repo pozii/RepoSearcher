@@ -181,8 +181,8 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		engine := search.NewGitHubEngine(flagGitHubToken)
 		results, err = engine.Search(config)
 	} else {
-		// Use LocalEngine
-		engine := search.NewLocalEngine()
+		// Use ParallelEngine for optimized performance
+		engine := search.NewParallelEngine()
 		results, err = engine.Search(config)
 	}
 
@@ -223,8 +223,8 @@ func runFuzzySearch(config models.SearchConfig, paths []string) ([]models.Search
 		return nil, err
 	}
 
-	// Use LocalEngine to find exact matches in identified names
-	engine := search.NewLocalEngine()
+	// Use ParallelEngine for optimized performance
+	engine := search.NewParallelEngine()
 	exactResults, err := engine.Search(config)
 	if err != nil {
 		return nil, err
