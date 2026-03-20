@@ -37,6 +37,7 @@
 - **GitHub Integration** - Search public repos via Codesearch API
 - **GitHub Token** - Private repo support with `--github-token`
 - **Git Integration** - Search in files changed by date, author, or commits
+- **Interactive TUI** - Full-screen terminal search with vim navigation
 - **Auto-Update** - Checks for updates on every run
 - **Cross-Platform** - Works on Windows, macOS, Linux
 
@@ -157,6 +158,26 @@ repo-searcher search "func" ./project --json results.json
 repo-searcher search "error" ./project --csv results.csv
 ```
 
+### Interactive TUI
+
+```bash
+# Launch in current directory
+repo-searcher i .
+
+# Launch with regex mode
+repo-searcher i ./src --regex
+
+# Launch with file extensions
+repo-searcher i ./project --extensions .go,.py
+```
+
+Keyboard shortcuts in TUI mode:
+- `j/k` or `Up/Down` - Navigate results
+- `Enter` - Execute search
+- `g/G` - Jump to top/bottom
+- `e` - Export results to JSON
+- `q/Esc` - Quit
+
 ---
 
 ## Demos (GIFs)
@@ -239,7 +260,8 @@ repo-searcher/
 │   ├── version.go        # Version command
 │   ├── install.go        # PATH installation
 │   ├── update.go         # Manual update
-│   └── uninstall.go      # Remove from PATH
+│   ├── uninstall.go      # Remove from PATH
+│   └── interactive.go    # Interactive TUI command
 ├── internal/
 │   ├── search/
 │   │   ├── engine.go     # Search interface
@@ -256,6 +278,9 @@ repo-searcher/
 │   │   └── installer.go  # Platform-specific PATH logic
 │   ├── updater/
 │   │   └── updater.go    # GitHub release check + download
+│   ├── tui/
+│   │   ├── tui.go        # Interactive TUI model
+│   │   └── styles.go     # TUI styling
 │   └── utils/
 │       └── utils.go      # Helpers
 ├── pkg/

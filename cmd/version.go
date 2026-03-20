@@ -7,7 +7,7 @@ import (
 )
 
 // Version is set at build time
-var Version = "v1.1.0"
+var Version = "v1.2.0"
 
 // BuildDate is set at build time
 var BuildDate = "unknown"
