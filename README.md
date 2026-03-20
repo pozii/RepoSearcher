@@ -37,6 +37,8 @@
 - **GitHub Integration** - Search public repos via Codesearch API
 - **GitHub Token** - Private repo support with `--github-token`
 - **Git Integration** - Search in files changed by date, author, or commits
+- **Fuzzy Search** - Tolerates typos (e.g. "fucntion" finds "function")
+- **Smart Suggestions** - AI-powered search suggestions (no API required)
 - **Interactive TUI** - Full-screen terminal search with vim navigation
 - **Auto-Update** - Checks for updates on every run
 - **Cross-Platform** - Works on Windows, macOS, Linux
@@ -103,6 +105,31 @@ repo-searcher search "func\s+\w+\(" ./src --regex
 
 # Case-insensitive search
 repo-searcher search "TODO" ./project --ignore-case
+```
+
+### Fuzzy Search (Tolerates Typos)
+
+```bash
+# Search with typo tolerance
+repo-searcher search "fucntion" ./src --fuzzy
+# Results: "function", "functions", "funct"
+
+# The algorithm uses:
+# - Levenshtein Distance (edit distance)
+# - Jaro-Winkler Similarity (optimized for code names)
+```
+
+### Smart Suggestions
+
+```bash
+# Get AI-powered search suggestions (no API required)
+repo-searcher search "pars" ./src --suggest
+# Results: "parse", "parseJSON", "parseInt", "parseError"
+
+# The suggestion engine analyzes:
+# - Code identifiers
+# - Function names
+# - Pattern frequency
 ```
 
 ### Multi-Directory Search
@@ -235,6 +262,8 @@ repo-searcher uninstall
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--regex` | Enable regex mode | `false` |
+| `--fuzzy` | Fuzzy search (tolerates typos) | `false` |
+| `--suggest` | Show smart suggestions | `false` |
 | `--ignore-case` | Case-insensitive search | `false` |
 | `--github` | Search GitHub repositories | `false` |
 | `--github-token` | GitHub API token | - |
@@ -268,7 +297,9 @@ repo-searcher/
 │   │   ├── local.go      # Local filesystem search
 │   │   ├── github.go     # GitHub Codesearch API
 │   │   ├── git.go        # Git history search
-│   │   └── matcher.go    # Regex/keyword matching
+│   │   ├── matcher.go    # Regex/keyword matching
+│   │   ├── fuzzy.go      # Fuzzy search (Levenshtein, Jaro-Winkler)
+│   │   └── suggest.go    # Smart suggestion engine
 │   ├── export/
 │   │   ├── json.go       # JSON export
 │   │   └── csv.go        # CSV export

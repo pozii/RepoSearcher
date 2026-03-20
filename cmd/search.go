@@ -25,6 +25,8 @@ var (
 	flagAuthor      string
 	flagChangedIn   string
 	flagCommitMsg   bool
+	flagFuzzy       bool
+	flagSuggest     bool
 )
 
 var searchCmd = &cobra.Command{
@@ -35,6 +37,8 @@ var searchCmd = &cobra.Command{
 Supports:
   - Keyword search (default)
   - Regex search (--regex)
+  - Fuzzy search (--fuzzy) - tolerates typos
+  - Smart suggestions (--suggest) - shows related matches
   - Case-insensitive search (--ignore-case)
   - File extension filtering (--extensions)
   - JSON/CSV export (--json, --csv)
@@ -44,6 +48,12 @@ Supports:
 Examples:
   # Search local directory
   repo-searcher search "func main" ./myproject
+
+  # Fuzzy search (tolerates typos like "fucntion" → "function")
+  repo-searcher search "fucntion" ./src --fuzzy
+
+  # Search with suggestions
+  repo-searcher search "pars" ./src --suggest
 
   # Search with regex
   repo-searcher search "func\s+\w+\(" ./myproject --regex
@@ -81,6 +91,10 @@ func init() {
 	searchCmd.Flags().StringVar(&flagAuthor, "author", "", "Search files by author")
 	searchCmd.Flags().StringVar(&flagChangedIn, "changed-in", "", "Search files changed in commit range (e.g. HEAD~5)")
 	searchCmd.Flags().BoolVar(&flagCommitMsg, "commit-message", false, "Search commit messages instead of file content")
+
+	// AI-like flags
+	searchCmd.Flags().BoolVar(&flagFuzzy, "fuzzy", false, "Enable fuzzy search (tolerates typos)")
+	searchCmd.Flags().BoolVar(&flagSuggest, "suggest", false, "Show smart suggestions")
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
@@ -111,7 +125,29 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	var results []models.SearchResult
 	var err error
 
-	if useGit {
+	// Handle suggest mode
+	if flagSuggest {
+		suggestEngine := search.NewSuggestEngine()
+		suggestions, err := suggestEngine.Suggest(config)
+		if err != nil {
+			return fmt.Errorf("suggestion failed: %w", err)
+		}
+
+		fmt.Printf("\nSuggestions for \"%s\":\n\n", query)
+		for i, s := range suggestions {
+			fmt.Printf("  %d. %s (score: %.2f) - %s\n", i+1, s.Text, s.Score, s.Context)
+		}
+		fmt.Println()
+		return nil
+	}
+
+	// Handle fuzzy search
+	if flagFuzzy {
+		results, err = runFuzzySearch(config, paths)
+		if err != nil {
+			return fmt.Errorf("fuzzy search failed: %w", err)
+		}
+	} else if useGit {
 		// Create git config
 		gitConfig := models.GitSearchConfig{
 			SearchConfig: config,
@@ -176,4 +212,36 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// runFuzzySearch performs fuzzy matching search
+func runFuzzySearch(config models.SearchConfig, paths []string) ([]models.SearchResult, error) {
+	// Get all identifiers from the codebase
+	suggestEngine := search.NewSuggestEngine()
+	suggestions, err := suggestEngine.Suggest(config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use LocalEngine to find exact matches in identified names
+	engine := search.NewLocalEngine()
+	exactResults, err := engine.Search(config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert suggestions to search results
+	var fuzzyResults []models.SearchResult
+	for _, s := range suggestions {
+		fuzzyResults = append(fuzzyResults, models.SearchResult{
+			FilePath:    "",
+			LineNumber:  0,
+			LineContent: fmt.Sprintf("[fuzzy match] %s (score: %.2f)", s.Text, s.Score),
+			MatchText:   s.Text,
+		})
+	}
+
+	// Combine results
+	allResults := append(exactResults, fuzzyResults...)
+	return allResults, nil
 }
