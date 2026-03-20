@@ -76,12 +76,12 @@
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/pozii/RepoSearcher/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/pozii/RepoSearcher/master/install.ps1 | iex
 ```
 
 **macOS/Linux:**
 ```bash
-curl -sSL https://raw.githubusercontent.com/pozii/RepoSearcher/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/pozii/RepoSearcher/master/install.sh | bash
 ```
 
 ### Download Binary
